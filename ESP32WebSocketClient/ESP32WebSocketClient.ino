@@ -44,7 +44,6 @@ void setup() {
 
   delay(5000);
 
-  //espwswh.herokuapp.com
   // Connect to the websocket server
   if (client.connect("demos.kaazing.com/echo", 80)) {
     Serial.println("Connected");
