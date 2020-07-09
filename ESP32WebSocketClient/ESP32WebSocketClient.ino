@@ -1,145 +1,106 @@
+#include <ArduinoWebsockets.h>
 #include <WiFi.h>
-#include <WebSocketClient.h>
 
-const char* ssid     = "Your SSID here";
-const char* password = "Your Password here";
+const char* ssid = "ssid"; //Enter SSID
+const char* password = "password"; //Enter Password
+const char* websockets_server_host = "serverip_or_name"; //Enter server adress
+const uint16_t websockets_server_port = 80; // Enter server port
 
 
-char path[] = "/echo";
-char host[] = "demos.kaazing.com";
+const int ledPin = 2; // ESP32 DevKit LED pin
+String pin_data = "";
+String Message = "";
+
 int pingCount = 0;
 
-const int relayPin = 2;
-String currState = "";
-String pin_data = "";
-String state = "";
+using namespace websockets;
 
-WebSocketClient webSocketClient;
-
-// Use WiFiClient class to create TCP connections
-WiFiClient client;
-
-void setup() {
-  Serial.begin(115200);
-  delay(10);
-
-  // We start by connecting to a WiFi network
-
-  Serial.println();
-  Serial.println();
-  Serial.print("Connecting to ");
-  Serial.println(ssid);
-
-  WiFi.begin(ssid, password);
-
-  while (WiFi.status() != WL_CONNECTED) {
-    delay(500);
-    Serial.print(".");
-  }
-
-  Serial.println("");
-  Serial.println("WiFi connected");
-  Serial.println("IP address: ");
-  Serial.println(WiFi.localIP());
-
-  delay(5000);
-
-  // Connect to the websocket server
-  if (client.connect("demos.kaazing.com/echo", 80)) {
-    Serial.println("Connected");
-  } else {
-    Serial.println("Connection failed.");
-    while (1) {
-      // Hang on failure
-    }
-  }
-
-  // Handshake with the server
-  webSocketClient.path = path;
-  webSocketClient.host = host;
-  if (webSocketClient.handshake(client)) {
-    Serial.println("Handshake successful");
-  } else {
-    Serial.println("Handshake failed.");
-    while (1) {
-      // Hang on failure
-    }
-  }
-
+void onMessageCallback(WebsocketsMessage message) {
+  Serial.print("Got Message: ");
+  //Serial.println(message.data());
+  Message = message.data();
+  Serial.println(Message);
 }
 
+void onEventsCallback(WebsocketsEvent event, String data) {
+  if (event == WebsocketsEvent::ConnectionOpened) {
+    Serial.println("Connnection Opened");
+  } else if (event == WebsocketsEvent::ConnectionClosed) {
+    Serial.println("Connnection Closed");
+  } else if (event == WebsocketsEvent::GotPing) {
+    Serial.println("Got a Ping!");
+  } else if (event == WebsocketsEvent::GotPong) {
+    Serial.println("Got a Pong!");
+  }
+}
 
-void loop() {
-  String data;
+WebsocketsClient client;
+void setup() {
+  Serial.begin(115200);
 
-  if (client.connected()) {
+  pinMode(ledPin, OUTPUT);
 
-    webSocketClient.getData(data);
-    if (data.length() > 0) {
-      Serial.print("Received data: ");
-      Serial.println(data);
-      if (data == "?" ) {
-        Serial.println("Sending Status");
-        if (pin_data == "1") {
-          webSocketClient.sendData("\"qstate\":\"ON\"");
-        } else {
-          webSocketClient.sendData("\"qstate\":\"OFF\"");
-        }
-        //webSocketClient.sendData("ESP Status");
-      } else if (data == "CMD:on") { //if command then execute
-        Serial.println("Sending CMD");
-        pinMode(2, OUTPUT);
-        digitalWrite(2, HIGH);
-        webSocketClient.sendData("\"cstate\":\"ON\"");
+  // Connect to wifi
+  WiFi.begin(ssid, password);
 
-      } else if (data == "CMD:off") { //if command then execute
-        Serial.println("Sending CMD");
-        pinMode(2, OUTPUT);
-        digitalWrite(2, LOW);
-        webSocketClient.sendData("\"cstate\":\"OFF\"");
-
-      } else if (data == "aack") { //if command then execute
-        Serial.println("Received aack!");
-      } else if (data == "cack") { //if command then execute
-        Serial.println("Received cack!");
-      } else if (data == "qack") { //if command then execute
-        Serial.println("Received qack!");
-      }
-
-      else {
-        Serial.println("ESP Command not recognised!");
-      }
-
-    }
-
-
-    if (pingCount > 10) {
-      pingCount = 0;
-
-      //capture the value of digital pin 2, send it along
-      pinMode(2, OUTPUT);
-      pin_data = String(digitalRead(2));
-      Serial.println("PinD - " + pin_data);
-
-      if (pin_data == "1") {
-        webSocketClient.sendData("\"astate\":\"ON\"");
-      } else {
-        webSocketClient.sendData("\"astate\":\"OFF\"");
-      }
-
-    }
-
-
-  } else {
-    Serial.println("Client disconnected.");
-    while (1) {
-      // Hang on disconnect.
-    }
+  // Wait some time to connect to wifi
+  for (int i = 0; i < 10 && WiFi.status() != WL_CONNECTED; i++) {
+    Serial.print(".");
+    delay(1000);
   }
 
-  // wait to fully let the client disconnect
-  pingCount += 1;
-  Serial.println(pingCount);
-  delay(1000);
+  // run callback when messages are received
+  client.onMessage(onMessageCallback);
 
+  // run callback when events are occuring
+  client.onEvent(onEventsCallback);
+
+  // Connect to server
+  client.connect(websockets_server_host, websockets_server_port, "/");
+
+  // Send a heartbeat message
+  client.send("\"heartbeat\":\"keepalive\"");
+}
+
+void loop() {
+  client.poll();
+
+  if (pingCount > 9) {
+    pingCount = 0;
+
+    //capture the value of digital pin, send it along
+    pin_data = String(digitalRead(ledPin));
+    Serial.println("PinStatus: " + pin_data);
+
+    if (pin_data == "1") {
+      client.send("\"astate\":\"ON\"");
+    } else {
+      client.send("\"astate\":\"OFF\"");
+    }
+  }
+  else {
+    //Serial.println("I'm listening!");
+    if (Message == "?") {
+      Serial.println("Sending Status");
+      if (pin_data == "1") {
+        client.send("\"qstate\":\"OFF\"");
+      } else {
+        client.send("\"qstate\":\"OFF\"");
+      }
+    } else if (Message == "CMD:on") { //if command then execute
+      Serial.println("Sending CMD");
+      digitalWrite(ledPin, HIGH);
+      client.send("\"cstate\":\"ON\"");
+
+    } else if (Message == "CMD:off") { //if command then execute
+      Serial.println("Sending CMD");
+      digitalWrite(ledPin, LOW);
+      client.send("\"cstate\":\"OFF\"");
+    }
+
+    // wait for 10 seconds to send acknowledegment
+    pingCount += 1;
+    Serial.println(pingCount);
+    delay(1000);
+  }
 }
