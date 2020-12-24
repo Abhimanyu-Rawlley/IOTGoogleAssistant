@@ -83,7 +83,7 @@ void loop() {
     if (Message == "?") {
       Serial.println("Sending Status");
       if (pin_data == "1") {
-        client.send("\"qstate\":\"OFF\"");
+        client.send("\"qstate\":\"ON\"");
       } else {
         client.send("\"qstate\":\"OFF\"");
       }
